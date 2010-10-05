@@ -11,7 +11,18 @@ data Body = Body { isInput :: Bool
                  , threshold :: Double }
 
 instance Show Body where
-    show a = show $ threshold a
+    show a = show $ (isInput a, inputValue a, threshold a)
+
+setInputs ::  (Graph gr) => gr Body b -> [Double] -> gr Body b
+setInputs gr is = recModNode gr t t2
+    where numIs = length is
+          t = take numIs (nodes gr)
+          t2 = map (\x -> Body {isInput = True, inputValue = x, function = id, threshold = 0}) is
+
+recModNode ::  (Graph gr) => gr a b -> [Node] -> [a] -> gr a b
+recModNode gr (n:ns) (b:bs) = recModNode (modNode gr n b) ns bs
+recModNode gr _ [] = gr
+recModNode gr [] _ = gr
 
 genNet :: Double -> (Double -> Double) -> [Node] -> IO (Gr Body Double)
 genNet t f ls = do
@@ -27,15 +38,30 @@ genNet t f ls = do
           edges [] _ = []
           edges _ [] = []
 
+modNode ::  (Graph gr) => gr a b -> Node -> a -> gr a b
+modNode gr node lab
+  | Just nn <- newNodes = mkGraph nn es
+  | otherwise = gr
+    where 
+          ns = labNodes gr
+          es = labEdges gr
+          newNodes
+            | Just _ <- lookup node ns = Just $ (node, lab) : (cutoff [] ns node)
+            | otherwise = Nothing
+          cutoff pre ((n, l):ns) id
+            | n == id = pre ++ ns
+            | otherwise = cutoff ((n, l):pre) ns id
+
 value gr n
-  | (Just (parents, thisId, thisLabel, children), gr') <- match n gr
+  | (Just (children, thisId, thisLabel, parents), gr') <- match n gr
   , True == isInput thisLabel
   = Just (inputValue thisLabel)
-  | (Just (parents, thisId, thisLabel, children), gr') <- match n gr = Just $ sum $ input parents
+  | (Just (children, thisId, thisLabel, parents), gr') <- match n gr = Just $ ((function thisLabel) . sum) $ input gr parents
   | otherwise = Nothing
-    where input ps = zipWith (*) (map (fromJust . (value gr) . ids) ps) (map wgs ps)
-          wgs (w, _) = w
-          ids (_, n) = n
+
+input gr ps = zipWith (*) (map (fromJust . (value gr) . ids) ps) (map wgs ps)
+wgs (w, _) = w
+ids (_, n) = n
 
 -- {{{ generates a random stream of type a
 randomRIOs ::  (Random a) => (a, a) -> Int -> IO [a]
